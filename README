@@ -1,0 +1,44 @@
+########################################################################
+# program    : Huffman Coding Tool
+# author     : Andrew Walsh (awalsh128@gmail.com)
+########################################################################
+
+==[ Summary ]===========================================================
+
+This program will compress and decompress any file using naive Huffman
+encoding.
+
+==[ Files ]=============================================================
+
+README          This file.
+Makefile        Make file to build and clean source.
+main.c          Main entry point file.
+bitio.c         Bit reader/writer module.
+bitio.h         Bit reader/writer module header.
+huffmancoding.c Huffman encoding module.
+huffmancoding.h Huffman encoding module header.
+minqueue.c      Minimum priority queue module.
+minqueue.h      Minimum priority queue module header.
+node.c          Graph node module holds the prefix code, length and
+                node pointers.
+node.h          Graph node module header.
+test.c          Bit reader/writer test module.
+test.in         Bit reader/writer test input file.
+
+==[ How to Compile & Run ]==============================================
+
+In order to build the executable and run from scratch.
+
+make all
+make clean
+./huffmancodes <filename>
+
+In order to remove the build and intermediate objects.
+
+make spotless
+
+==[ Caveats & Additional Information ]==================================
+
+Exit codes are in blocks: 0 is success, ...
+Please see main.c comments for more detail on exit codes.
+
