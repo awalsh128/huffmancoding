@@ -10,10 +10,13 @@ int main(int argc, char** argv)
 	const char* comp_filename = "foo.comp";
 	const char* uncomp_filename = "foo.uncomp";
 
-	printf("compressed %s to %s...\n", input_filename, comp_filename);
-	hc_compress(input_filename, comp_filename);
-	printf("uncompressed %s to %s...\n", comp_filename, uncomp_filename);
-	hc_uncompress(comp_filename, uncomp_filename);
+	printf("compressing %s to %s...\n", input_filename, comp_filename);
+	if (hc_compress(input_filename, comp_filename)) {
+		printf("uncompressing %s to %s...\n", comp_filename, uncomp_filename);
+		if (!hc_uncompress(comp_filename, uncomp_filename)) return -2;
+	} else {
+		return -1;
+	}
 
 	return 0;
 }

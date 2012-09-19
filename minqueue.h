@@ -5,9 +5,9 @@
 
 typedef struct minqueue* minqueue_ptr;
 
-void mq_free(minqueue_ptr queue);
+void mq_delete(minqueue_ptr queue);
 
-minqueue_ptr mq_malloc(void);
+minqueue_ptr mq_new(void);
 
 void mq_insert(minqueue_ptr queue, node_ptr node);
 

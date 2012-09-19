@@ -1,3 +1,6 @@
+/* author: Andrew Walsh (awalsh128@gmail.com) */
+
+#include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -6,21 +9,21 @@
 
 struct node
 {
-	char symbol;
+	unsigned char symbol;
 	int count;
-	uint256_t code;
-	uint8_t codelen;
+	unsigned char* code;
+	int codelen;
 	struct node* link;
 	struct node* left;
 	struct node* right;
 };
 
-uint256_t node_code(node_ptr node)
+unsigned char* node_code(node_ptr node)
 {
 	return node->code;
 }
 
-uint8_t node_codelen(node_ptr node)
+int node_codelen(node_ptr node)
 {
 	return node->codelen;
 }
@@ -30,10 +33,16 @@ int node_count(node_ptr node)
 	return node->count;
 }
 
-void node_free(node_ptr node)
+void node_delete(node_ptr node)
 {
+	assert(node != NULL);
+	node->link = NULL;	
+	node->left = NULL;	
+	node->right = NULL;	
+	free(node->code);
 	memset(node, sizeof(struct node), 0);
 	free(node);
+	node = NULL;
 }
 
 void node_inccount(node_ptr node)
@@ -46,7 +55,7 @@ int node_isleaf(node_ptr node)
 	return (node->left == NULL) && (node->right == NULL);
 }
 
-node_ptr node_malloc()
+node_ptr node_new(void)
 {
 	node_ptr node = malloc(sizeof(struct node));
 	memset(node, sizeof(struct node), 0);
@@ -107,29 +116,10 @@ void node_listsort(node_ptr* nodes, int i, int j)
 	}
 }
 
-char* byte_to_binary(uint256_t code, uint8_t len)
+void node_setcode(node_ptr node, unsigned char* code, int codelen)
 {
-	char* b = malloc(sizeof(char) + len + 1);
-	uint256_t mask = 0x80;
-	b[len] = '\0';
-
-	for (int i = 0; i < len; i++, mask >>= 1)
-		b[i] = ((code & mask) == mask) ? '1' : '0';
-
-	return b;
-}
-
-void node_setcode(node_ptr node, uint256_t code, uint8_t codelen)
-{
-	char* bits;
-	
 	node->code = code;
 	node->codelen = codelen;
-	if (node->symbol != '\0') {
-		bits = byte_to_binary(node->code, node->codelen);
-		printf("symbol = %c, count = %03d, code = %s\n", node->symbol, node->count, bits);
-		free(bits);
-	}
 }
 
 void node_setcount(node_ptr node, int count)
@@ -152,7 +142,7 @@ void node_setright(node_ptr node, node_ptr right)
 	node->right = right;
 }
 
-void node_setsymbol(node_ptr node, char symbol)
+void node_setsymbol(node_ptr node, unsigned char symbol)
 {
 	node->symbol = symbol;
 }

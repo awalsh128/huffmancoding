@@ -4,8 +4,8 @@ EXE = hc_compress
 
 CC = gcc
 CFLAGS = -g -Wall -pedantic --std=gnu99
-CSOURCES = main.c node.c minqueue.c bitio.c huffmancodes.c
-CHEADERS = node.h minqueue.h bitio.c huffmancodes.h
+CSOURCES = main.c node.c minqueue.c bitio.c huffmancoding.c
+CHEADERS = node.h minqueue.h bitio.c huffmancoding.h
 COBJECTS = ${CSOURCES:.c=.o} 
 SCCFILES = ${CSOURCES} ${CHEADERS} \
            Makefile README

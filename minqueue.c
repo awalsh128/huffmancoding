@@ -17,7 +17,7 @@ node_ptr mq_dequeue(minqueue_ptr queue)
 	return node;
 }
 
-void mq_free(minqueue_ptr queue)
+void mq_delete(minqueue_ptr queue)
 {
 	memset(queue, sizeof(struct minqueue), 0);
 	free(queue);
@@ -58,7 +58,7 @@ int mq_isempty(minqueue_ptr queue)
 	return (queue->head == NULL);
 }
 
-minqueue_ptr mq_malloc(void)
+minqueue_ptr mq_new(void)
 {
 	minqueue_ptr queue = malloc(sizeof(struct minqueue));
 	memset(queue, sizeof(struct minqueue), 0);

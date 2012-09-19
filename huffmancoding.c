@@ -1,95 +1,86 @@
+/* author: Andrew Walsh (awalsh128@gmail.com) */
+
 #include <assert.h>
-#include <limit.h>
+#include <limits.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "bitio.h"
 #include "node.h"
 #include "minqueue.h"
-#include "huffmancodes.h"
+#include "huffmancoding.h"
 
 #define FILE_MAGIC_NUM 0x9f45f1d5
 #define TABLE_SIZE (int)(sizeof(char)*256) // 2^8 = 256
-#define INTERNAL_NODE 0
-#define LEAF_NODE 1
-#define LEFT_BRANCH_BIT 0
-#define RIGHT_BRANCH_BIT 1
+#define INTERNAL_NODE 0x00
+#define LEAF_NODE 0x80
+#define LEFT_BRANCH_BIT 0x80
+#define RIGHT_BRANCH_BIT 0x00
 
-unsigned char* _binread_code(FILE* file_ptr, char* table)
+static unsigned char* _catbit(unsigned char bit, unsigned char* bits, int bits_len)
 {
-	unsigned char bit;
-	unsigned char* code = 0;
-	uint8_t code_len = 0;
-	const int code_max = sizeof(unsigned char*) * CHAR_BIT;
-	static unsigned char block;
-	unsigned char block_mask = 0x00;
+	unsigned char* newbits;
+	int bits_size, newbits_size; 
 
-	// test candidate code bit by bit
-	while ((table[(int)code] == NULL) || (code_len == 0)) {
-		// create new code
-		code_len++;
-		if (_binread_bits(file_ptr, 1)) code |= 1 << (code_max - code_len);
-		// shift mask for next block bit evaluation
-		block_mask >>= 1;
+	bits_size = bio_byte_size(bits_len);
+	newbits_size = bio_byte_size(bits_len + 1);
+	newbits = malloc(sizeof(unsigned char) * newbits_size);
+	memset(newbits, 0, newbits_size);
+	memcpy(newbits, bits, bits_size);
+
+	for (int i = (newbits_size - 1); i > 0; i--) {
+		newbits[i] = (newbits[i] >> 1) | newbits[i - 1];
 	}
+	newbits[0] = (newbits[0] >> 1) | bit;
 
-	// shift off valid code
-	block <<= code_len;
-
-	return table[(int)code];
+	return newbits;
 }
 
-void _binwrite(FILE* file_ptr, unsigned char* code, uint8_t code_len)
+static void _create_codes_r(node_ptr node, unsigned char bit, unsigned char* code, int code_len)
 {
-	static unsigned short int window = 0x0000;
-	static int window_len = 0;
-	const int window_max = sizeof(unsigned short int) * CHAR_BIT;
-	const int block_len = sizeof(unsigned char) * CHAR_BIT;
+	int newcode_len;
+	unsigned char* newcode;
 
-	window_len += code_len;	
-	window |= code << (window_max - window_len - code_len);
-
-	if (window_len > block_len) {
-		fputc((unsigned char)(window >> block_len), file_ptr);
-		window <<= block_len;
-	}
-}
-
-void _create_codes_r(node_ptr node, unsigned char* code, uint8_t codelen)
-{
-	// make room for new bit overlay
-	unsigned char* new_code = code << 1;
-	uint8_t new_codelen = codelen + 1;
 	node_ptr lnode = node_left(node);
 	node_ptr rnode = node_right(node);
 
+	newcode = _catbit(bit, code, code_len);
+	newcode_len = code_len + 1;
+
 	if (node_isleaf(node)) {
-		node_setcode(node, code << (CHAR_BIT - codelen), codelen);
+		node_setcode(node, newcode, newcode_len);
 	} else {
-		if (lnode != NULL) _create_codes_r(lnode, new_code | LEFT_BRANCH_BIT, new_codelen);
-		if (rnode != NULL) _create_codes_r(rnode, new_code | RIGHT_BRANCH_BIT, new_codelen);
+		if (lnode != NULL) _create_codes_r(lnode, LEFT_BRANCH_BIT, newcode, newcode_len);
+		if (rnode != NULL) _create_codes_r(rnode, RIGHT_BRANCH_BIT, newcode, newcode_len);
+		free(newcode);
 	}
 }
 
-void _create_codes(node_ptr root)
+static void _create_codes(node_ptr root)
 {
-	_create_codes_r(node_left(root), LEFT_BRANCH_BIT, 1);
-	_create_codes_r(node_right(root), RIGHT_BRANCH_BIT, 1);
+	unsigned char* code = malloc(sizeof(char));
+
+	_create_codes_r(node_left(root), LEFT_BRANCH_BIT, code, 0);
+	_create_codes_r(node_right(root), RIGHT_BRANCH_BIT, code, 0);
+
+	free(code);
 }
 
-node_ptr* _create_table(FILE* file_ptr, int* node_count_ptr)
+static node_ptr* _create_table(FILE* file_ptr, int* node_count_ptr)
 {
 	int node_count = *node_count_ptr;
 	char symbol;
 	node_ptr* table;
 
-	table = malloc(sizeof(node_ptr)*TABLE_SIZE);
+	table = malloc(sizeof(node_ptr) * TABLE_SIZE);
 	for (int i = 0; i < TABLE_SIZE; i++)
 		table[i] = NULL;
 
 	while ((symbol = fgetc(file_ptr)) != EOF) {
 		if (table[(int)symbol] == NULL) {
-			table[(int)symbol] = node_malloc();
+			table[(int)symbol] = node_new();
 			node_setsymbol(table[(int)symbol], symbol);
 			node_count++;
 		}
@@ -100,12 +91,12 @@ node_ptr* _create_table(FILE* file_ptr, int* node_count_ptr)
 	return table;
 }
 
-node_ptr _create_tree(node_ptr* table)
+static node_ptr _create_tree(node_ptr* table)
 {
 	minqueue_ptr queue;
 	node_ptr lnode, rnode, pnode, root;
 
-	queue = mq_malloc();
+	queue = mq_new();
 	for (int i = 0; i < TABLE_SIZE; i++) {
 		if (table[i] != NULL)
 			mq_insert(queue, table[i]);
@@ -115,7 +106,7 @@ node_ptr _create_tree(node_ptr* table)
 		lnode = mq_dequeue(queue);
 		if (!mq_isempty(queue)) {
 			rnode = mq_dequeue(queue);
-			pnode = node_malloc();
+			pnode = node_new();
 			node_setcount(pnode, node_count(lnode) + node_count(rnode));
 			node_setleft(pnode, lnode);
 			node_setright(pnode, rnode);
@@ -123,7 +114,7 @@ node_ptr _create_tree(node_ptr* table)
 		}
 	}
 	
-	mq_free(queue);
+	mq_delete(queue);
 
 	root = lnode;
 	_create_codes(root);
@@ -131,90 +122,129 @@ node_ptr _create_tree(node_ptr* table)
 	return root;
 }
 
-void _free_table(node_ptr* table)
+static void _delete_table(node_ptr* table)
 {
 	for (int i = 0; i < TABLE_SIZE; i++) {
 		if (table[i] != NULL)
-			node_free(table[i]);
+			node_delete(table[i]);
 	}
 	free(table);
 }
 
-void _free_tree_r(node_ptr node)
+static void _delete_tree_r(node_ptr node)
 {
 	node_ptr lnode = node_left(node);
 	node_ptr rnode = node_right(node);
 
 	if (lnode != NULL) {
-		_free_tree_r(lnode);
+		_delete_tree_r(lnode);
 		if (node_symbol(lnode) == 0)
-			node_free(lnode);
+			node_delete(lnode);
 	}
 	if (rnode != NULL) {
-		_free_tree_r(rnode);
+		_delete_tree_r(rnode);
 		if (node_symbol(rnode) == 0)
-			node_free(rnode);
+			node_delete(rnode);
 	}
 }
 
-void _free_tree(node_ptr root)
+static void _delete_tree(node_ptr root)
 {
-	_free_tree_r(root);
-	node_free(root);
+	_delete_tree_r(root);
+	node_delete(root);
 }
 
-void _read_table_r(FILE* file_ptr, int* node_count, unsigned char* table, 
-					    unsigned char* code, uint8_t codelen)
+static node_ptr _read_tree_r(breader_ptr reader, unsigned char bit, unsigned char* code, int code_len)
 {
-	if ((*node_count) == 0) return;
-	(*node_count)--;
+	unsigned char ptype;
+	unsigned char symbol;
+	node_ptr pnode, lnode, rnode;
+	unsigned char* newcode;
+	int newcode_len;
 
-	unsigned char* new_code = code << 1;
-	uint8_t new_codelen = codelen + 1;
-	unsigned char ltype, rtype, ptype;
+	newcode = _catbit(bit, code, code_len);
+	newcode_len = code_len + 1;
 
-	ptype = _binread_bits(file_ptr, 1);
+	pnode = node_new();
+	ptype = bio_read_byte(reader, 1);
+
 	if (ptype == LEAF_NODE) {
-		table[(int)code] = _binread_bits(file_ptr, 8);
+		symbol = bio_read_byte(reader, CHAR_BIT);
+		node_setcode(pnode, newcode, newcode_len);
+		node_setsymbol(pnode, symbol);
+	} else if (ptype == INTERNAL_NODE) {
+		lnode = _read_tree_r(reader, LEFT_BRANCH_BIT, newcode, newcode_len);
+		rnode = _read_tree_r(reader, RIGHT_BRANCH_BIT, newcode, newcode_len);
+		node_setleft(pnode, lnode);
+		node_setright(pnode, rnode);
+		free(newcode);
 	} else {
-		_read_table_r(file_ptr, node_count, table, new_code | LEFT_BRANCH_BIT, new_codelen);
-		_read_table_r(file_ptr, node_count, table, new_code | RIGHT_BRANCH_BIT, new_codelen);
+		printf("error: ptype = %#x\n", ptype);
 	}
-}
 
-unsigned char* _read_table(FILE* file_ptr, int node_count)
+	return pnode;
+}
+static node_ptr _read_tree(breader_ptr reader)
 {
-	unsigned char* table;
-	int* count;
+	unsigned char rtype;
+	unsigned char symbol;
+	node_ptr root, lnode, rnode;
+	unsigned char* code;
+	int code_len;
 
-	table = malloc(sizeof(unsigned char)*TABLE_SIZE);
-	for (int i = 0; i < TABLE_SIZE; i++)
-		table[i] = NULL;
+	code = malloc(sizeof(unsigned char));
+	code_len = 0;
 
-	(*count) = node_count;
-	_read_table_r(file_ptr, count, table, 0, 0);
+	root = node_new();
+	rtype = bio_read_byte(reader, 1);
 
-	return table;
+	if (rtype == LEAF_NODE) {
+		symbol = bio_read_byte(reader, CHAR_BIT);
+		node_setcode(root, code, code_len);
+		node_setsymbol(root, symbol);
+	} else if (rtype == INTERNAL_NODE) {
+		lnode = _read_tree_r(reader, LEFT_BRANCH_BIT, code, code_len);
+		rnode = _read_tree_r(reader, RIGHT_BRANCH_BIT, code, code_len);
+		node_setleft(root, lnode);
+		node_setright(root, rnode);
+		free(code);
+	} else {
+		printf("error: rtype = %#x\n", rtype);
+	}
+
+	return root;
 }
 
-void _write_codes(FILE* readfile_ptr, FILE* writefile_ptr, node_ptr* table)
+void _write_codes(FILE* readfile_ptr, bwriter_ptr writer, node_ptr* table)
 {
 	char symbol;
 	node_ptr node;
-	unsigned char* code; 
-	uint8_t codelen;
 
 	while ((symbol = fgetc(readfile_ptr)) != EOF)
 	{
 		node = table[(int)symbol];
-		code = node_code(node);
-		codelen = node_codelen(node);
+		bio_write(writer, node_code(node), node_codelen(node));
+	}
+}
 
-		bits = byte_to_binary(code, codelen);
-		printf("symbol = %c, code = %s\n", symbol, bits);
-		free(bits);
+void _write_symbols(breader_ptr reader, FILE* writefile_ptr, node_ptr tree_root)
+{
+	node_ptr node = tree_root;
+	unsigned char bit;
+	unsigned char symbol;
 
-		bio_write(writer, code, codelen);
+	while (!bio_eof(reader)) {
+		bit = bio_read_byte(reader, 1);
+		if (bit == LEFT_BRANCH_BIT) {
+			node = node_left(node);
+		} else {
+			node = node_right(node);
+		}
+		if (node_isleaf(node)) {
+			symbol = node_symbol(node);
+			fwrite(&symbol, 1, 1, writefile_ptr);
+			node = tree_root;
+		}
 	}
 }
 
@@ -224,101 +254,80 @@ void _write_tree(bwriter_ptr writer, node_ptr node)
 	node_ptr rnode = node_right(node);
 
 	if (node_isleaf(node)) {
-		bio_write(writer, LEAF_NODE, 1);
-		bio_write(writer, node_symbol(node), CHAR_BIT);
+		bio_write_byte(writer, LEAF_NODE, 1);
+		bio_write_byte(writer, node_symbol(node), CHAR_BIT);
 	} else {
-		bio_write(writer, INTERNAL_NODE, 1);
+		bio_write_byte(writer, INTERNAL_NODE, 1);
 		if (lnode != NULL) _write_tree(writer, lnode);
 		if (rnode != NULL) _write_tree(writer, rnode);
 	}
 }
 
-codetable_ptr hc_codetable_read(FILE* fileread_ptr)
-{
-	codetable_ptr table;
-	unsigned char* code;
-	char symbol;
-	unsigned char count = 0;
-	uint header = 0;
-	
-	fscanf(fileread_ptr, "%08x", &header);
-	assert(header == FILE_MAGIC_NUM);
-
-	fscanf(fileread_ptr, "%c", &count);
-	assert(count > 0);
-
-	table = malloc(sizeof(char)*TABLE_SIZE);
-
-	while (count > 0) {
-		code = fgetc(fileread_ptr);
-		symbol = fgetc(fileread_ptr);
-		table[(int)code] = symbol;
-		count--;
-	}
-	symbol = fgetc(fileread_ptr);
-
-	return table;	
-}
-
-void hc_compress(const char* readfilename, const char* writefilename)
+int hc_compress(const char* readfilename, const char* writefilename)
 {
 	FILE* readfile_ptr;
+	size_t readfile_size;
 	bwriter_ptr writer;
 	node_ptr* table;
 	node_ptr tree_root;
-	unsigned char node_count = 0x00;
+	int node_count = 0;
 
-	readfile_ptr = fopen(readfilename, "w");
-	writer = bio_malloc_writer(writefilename);
+	// verify file is compressable
+	readfile_ptr = fopen(readfilename, "r");
+	fseek(readfile_ptr, 0L, SEEK_END);
+	readfile_size = ftell(readfile_ptr);
+	fseek(readfile_ptr, 0L, SEEK_SET);	
+	if (readfile_size == 0) {
+		fprintf(stderr, "Nothing to compress.\n");
+		return 0;
+	}
 
 	// create lookup table and huffman code tree
-	table = _create_table(reader, &node_count);
+	table = _create_table(readfile_ptr, &node_count);
 	tree_root = _create_tree(table);
 
+	writer = bio_writer_new(writefilename);
+
 	// write out file header magic number
-	bio_write(writer, FILE_MAGIC_NUM, 64);
-	// write out node count
-	bio_write(writer, node_count, 8);
+	fprintf(bio_file_ptr(writer), "%08x", FILE_MAGIC_NUM);
 
 	// serialize the huffman code tree
 	_write_tree(writer, tree_root);
 	// serialize codes
 	_write_codes(readfile_ptr, writer, table);	
 
-	fclose(fileread_ptr);
-	bio_free(writer);
+	fclose(readfile_ptr);
+	bio_writer_delete(writer);
 
-	_free_tree(tree_root);
-	_free_table(table);
+	_delete_tree(tree_root);
+	_delete_table(table);
+
+	return 1;
 }
 
-void hc_uncompress(const char* readfilename, const char* writefilename)
+int hc_uncompress(const char* readfilename, const char* writefilename)
 {
-	FILE* readfile_ptr;
 	FILE* writefile_ptr;
+	breader_ptr reader;
 	unsigned int header;
-	unsigned char node_count;
 	node_ptr tree_root;
-	node_ptr* table;
 
-	readfile_ptr = fopen(readfilename, "r");
+	reader = bio_reader_new(readfilename);
 	writefile_ptr = fopen(writefilename, "w");
 
 	// read in file header magic number
-	fscanf(fileread_ptr, "%08x", &header);
+	fscanf(bio_file_ptr(reader), "%08x", &header);
 	// verify file is our format
 	assert(header == FILE_MAGIC_NUM);
 
-	// read in node count
-	fscanf(fileread_ptr, "%c", &node_count);
-
-	// deserialize the huffman code tree and create lookup table
-	table = _read_table(fileread_ptr, node_count);
+	// deserialize the huffman coding tree
+	tree_root = _read_tree(reader);
 	// deserialize codes
-	_write_symbols(fileread_ptr, writefile_ptr, table);
+	_write_symbols(reader, writefile_ptr, tree_root);
 
-	fclose(fileread_ptr);
-	fclose(filewrite_ptr);
+	_delete_tree(tree_root);
+	bio_reader_delete(reader);
+	fclose(writefile_ptr);
 
-	_free_table(table);	
+	return 1;
 }
