@@ -210,9 +210,6 @@ void bio_write(bwriter_ptr writer, unsigned char* bits, int write_len)
 	fwrite_len = write_len + writer->buffer_len;
 	fwrite_size = fwrite_len / CHAR_BIT;
 
-	printf("write = ");
-	bio_print(bits, write_len);
-
 	if (fwrite_size == 0) {
 
 		// case where write buffer not full yet
@@ -235,8 +232,6 @@ void bio_write(bwriter_ptr writer, unsigned char* bits, int write_len)
 			block_head = bits[i] << block_tail_len;
 		}
 
-		printf(", write out = ");
-		bio_print(out, 8);
 		fwrite(out, 1, fwrite_size, writer->file_ptr);
 
 		if (write_size == fwrite_size) {
@@ -249,9 +244,6 @@ void bio_write(bwriter_ptr writer, unsigned char* bits, int write_len)
 		free(out);
 	}
 
-	printf(", buffer = ");
-	bio_print(&(writer->buffer), writer->buffer_len);
-	printf("\n");
 }
 
 void bio_write_byte(bwriter_ptr writer, unsigned char bits, int write_len)
